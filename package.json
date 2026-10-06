@@ -1,17 +1,21 @@
 {
-  "name": "zeroagar-server",
-  "version": "1.0.0",
-  "description": "ZeroAgar Game Server for Railway",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "cors": "^2.8.5",
-    "express": "^4.19.2",
-    "ws": "^8.18.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  }
+  "name": "Agar.Cc",
+  "short_name": "Agar Cc",
+  "icons": [
+    {
+      "src": "/manifest/img/128x128.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    },
+    {
+      "src": "/manifest/img/192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#ffffff",
+  "background_color": "#1f1f1f",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait"
 }
