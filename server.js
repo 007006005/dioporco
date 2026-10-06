@@ -291,17 +291,40 @@ function tick() {
         addCell('virus', rnd(300, CFG.border - 300), rnd(300, CFG.border - 300), CFG.virusSize, [51, 255, 51]);
     }
 
+// Costruzione pacchetto Classifica (Opcode 49) - Sempre 10 slot per evitare il crash client
     let lbBuf = null;
     if (tickCount % 25 === 0) {
-        const top = Array.from(players).filter(p => p.cells.length)
-            .map(p => ({ p, a: totalArea(p) })).sort((a, b) => b.a - a.a).slice(0, 10);
+        const top = Array.from(players)
+            .filter(p => p.cells && p.cells.length > 0)
+            .map(p => ({ p, a: totalArea(p) }))
+            .sort((a, b) => b.a - a.a)
+            .slice(0, 10);
+
+        // Popola sempre 10 elementi (riempie con slot vuoti se ci sono meno di 10 giocatori)
+        const lbItems = [];
+        for (let i = 0; i < 10; i++) {
+            if (i < top.length && top[i].p) {
+                const p = top[i].p;
+                const cellId = (p.cells && p.cells[0]) ? p.cells[0].id : 0;
+                const name = p.name || 'Player';
+                lbItems.push({ id: cellId, name });
+            } else {
+                lbItems.push({ id: 0, name: '' });
+            }
+        }
+
         let size = 5; 
-        for (const t of top) size += 4 + strBytes(t.p.name);
-        lbBuf = Buffer.alloc(size); lbBuf[0] = 49; lbBuf.writeUInt32LE(top.length, 1);
+        for (const item of lbItems) {
+            size += 4 + strBytes(item.name);
+        }
+
+        lbBuf = Buffer.alloc(size); 
+        lbBuf[0] = 49; 
+        lbBuf.writeUInt32LE(lbItems.length, 1);
         let o = 5;
-        for (const t of top) { 
-            lbBuf.writeUInt32LE(t.p.cells[0].id, o); 
-            o = putStr(lbBuf, o + 4, t.p.name); 
+        for (const item of lbItems) { 
+            lbBuf.writeUInt32LE(item.id, o); 
+            o = putStr(lbBuf, o + 4, item.name); 
         }
     }
 
