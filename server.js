@@ -2,14 +2,13 @@
 
 /*
  * Server ZeroAgar per Railway (Express + WebSockets)
- * Serve i file statici dalla cartella ./public e gestisce il protocollo binario di gioco.
+ * Gestisce l'hosting statico, l'handshake binario e la sincronizzazione di gioco.
  */
 
 const express = require('express');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const cors = require('cors');
 
@@ -17,15 +16,10 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-// ---- Variabili d'ambiente (Login / Salvataggi)
-const AUTH_SECRET  = process.env.AUTH_SECRET  || '';
-const SERVER_KEY   = process.env.SERVER_KEY   || '';
-const API_SAVE_URL = process.env.API_SAVE_URL || '';
-
 // ---- Middleware & CORS
 app.use(cors());
 
-// Forzatura Header per manifest.json e file JSON
+// Intestazioni corrette per file JSON e Manifest PWA
 app.use((req, res, next) => {
     if (req.url.endsWith('.json')) {
         res.setHeader('Content-Type', 'application/json');
@@ -33,37 +27,49 @@ app.use((req, res, next) => {
     next();
 });
 
-// Servizio file statici da public/
-app.use(express.static(PUBLIC_DIR, {
-    setHeaders: (res, reqPath) => {
-        if (reqPath.endsWith('.webp') || reqPath.endsWith('.png') || reqPath.endsWith('.svg') || reqPath.endsWith('.json')) {
-            res.setHeader('Cache-Control', 'public, max-age=31536000');
+// Servizio file statici dalla cartella public/
+if (fs.existsSync(PUBLIC_DIR)) {
+    app.use(express.static(PUBLIC_DIR, {
+        setHeaders: (res, reqPath) => {
+            if (reqPath.endsWith('.webp') || reqPath.endsWith('.png') || reqPath.endsWith('.svg')) {
+                res.setHeader('Cache-Control', 'public, max-age=31536000');
+            }
         }
-    }
-}));
+    }));
+}
+app.use(express.static(__dirname));
 
 // Endpoint Health Check per Railway
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
-// Redirezioni e gestione percorsi del gioco
-app.get('/', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'game.html')));
-app.get('/index.html', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'game.html')));
-app.get('/games/agar', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'game.html')));
-app.get('/games/agar/*', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'game.html')));
+// Routing dinamico
+app.get('/', (req, res) => {
+    const pubGame = path.join(PUBLIC_DIR, 'game.html');
+    if (fs.existsSync(pubGame)) return res.sendFile(pubGame);
+    res.sendFile(path.join(__dirname, 'game.html'));
+});
+
+app.get('/games/agar*', (req, res) => {
+    const pubGame = path.join(PUBLIC_DIR, 'game.html');
+    if (fs.existsSync(pubGame)) return res.sendFile(pubGame);
+    res.sendFile(path.join(__dirname, 'game.html'));
+});
 
 // Fallback generale
 app.get('*', (req, res) => {
-    const requestedPath = path.join(PUBLIC_DIR, req.path);
-    if (fs.existsSync(requestedPath) && fs.statSync(requestedPath).isFile()) {
-        return res.sendFile(requestedPath);
+    const requestedFile = path.join(PUBLIC_DIR, req.path);
+    if (fs.existsSync(requestedFile) && fs.statSync(requestedFile).isFile()) {
+        return res.sendFile(requestedFile);
     }
-    res.sendFile(path.join(PUBLIC_DIR, 'game.html'));
+    const pubGame = path.join(PUBLIC_DIR, 'game.html');
+    if (fs.existsSync(pubGame)) return res.sendFile(pubGame);
+    res.sendFile(path.join(__dirname, 'game.html'));
 });
 
 // ---- Configurazione Mondo di Gioco
 const CFG = {
     border: 14000,
-    tickMs: 40,             // 25 tick/s
+    tickMs: 40,             // 25 tick/sec
     foodMax: 800, foodSize: 10,
     virusMax: 15, virusSize: 100,
     startSize: 32, minSplitSize: 60, maxCells: 16,
@@ -118,7 +124,7 @@ function newPlayerCell(p, x, y, size) {
     return c;
 }
 
-// ---- Utility Binarie WebSocket
+// ---- Helper Binari
 const strBytes = (s) => (s.length + 1) * 2;
 function putStr(buf, off, s) {
     for (let i = 0; i < s.length; i++) buf.writeUInt16LE(s.charCodeAt(i), off + 2 * i);
@@ -153,7 +159,7 @@ function totalArea(p) {
     return p.cells.reduce((s, c) => s + c.size * c.size, 0); 
 }
 
-// ---- Logica Giocatore
+// ---- Azioni Giocatore
 function spawnPlayer(p, name) {
     if (p.cells.length) return;
     p.name = name; p.alive = true; p.spectate = false;
@@ -214,7 +220,7 @@ function eatCell(eater, prey) {
     }
 }
 
-// ---- Loop Tick del Server
+// ---- Loop Tick
 function tick() {
     tickCount++;
     eatEvents = [];
@@ -291,7 +297,7 @@ function tick() {
         addCell('virus', rnd(300, CFG.border - 300), rnd(300, CFG.border - 300), CFG.virusSize, [51, 255, 51]);
     }
 
-// Costruzione pacchetto Classifica (Opcode 49) - Sempre 10 slot per evitare il crash client
+    // Classifica fissa a 10 slot (evita TypeError su datad23b.js)
     let lbBuf = null;
     if (tickCount % 25 === 0) {
         const top = Array.from(players)
@@ -300,7 +306,6 @@ function tick() {
             .sort((a, b) => b.a - a.a)
             .slice(0, 10);
 
-        // Popola sempre 10 elementi (riempie con slot vuoti se ci sono meno di 10 giocatori)
         const lbItems = [];
         for (let i = 0; i < 10; i++) {
             if (i < top.length && top[i].p) {
@@ -314,10 +319,7 @@ function tick() {
         }
 
         let size = 5; 
-        for (const item of lbItems) {
-            size += 4 + strBytes(item.name);
-        }
-
+        for (const item of lbItems) size += 4 + strBytes(item.name);
         lbBuf = Buffer.alloc(size); 
         lbBuf[0] = 49; 
         lbBuf.writeUInt32LE(lbItems.length, 1);
@@ -337,7 +339,7 @@ function tick() {
         const ref = p.cells.length ? p : (p.spectate ? leader : null);
         if (ref && ref.cells.length) {
             cx = ref.cells.reduce((s, c) => s + c.x, 0) / ref.cells.length;
-            cy = ref.cells.reduce((s, c) => s + c.size, 0) / ref.cells.length;
+            cy = ref.cells.reduce((s, c) => s + c.y, 0) / ref.cells.length;
             total = ref.cells.reduce((s, c) => s + c.size, 0);
         }
         const scale = Math.pow(Math.min(64 / total, 1), 0.4);
@@ -383,7 +385,7 @@ function tick() {
     }
 }
 
-// ---- Avvio WebSockets & Server HTTP
+// ---- Avvio Server HTTP & WebSockets
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, maxPayload: 2048 });
 
@@ -396,7 +398,6 @@ wss.on('connection', (ws) => {
         visible: new Set(), lastChat: 0 
     };
     players.add(p);
-    
     sendBorder(p);
 
     ws.on('message', (data, isBinary) => {
